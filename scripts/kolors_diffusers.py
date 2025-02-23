@@ -89,7 +89,7 @@ import scripts.kolors_pipeline as pipeline
 
 
 # modules/processing.py - don't use ',', '\n', ':' in values
-def create_infotext(sampler, positive_prompt, negative_prompt, guidance_scale, guidance_rescale, steps, seed, width, height, PAG_scale, PAG_adapt, loraSettings):
+def create_infotext(sampler, positive_prompt, negative_prompt, guidance_scale, guidance_rescale, steps, seed, width, height, PAG_scale, PAG_adapt, loraSettings, controlNetSettings):
     bCFG = ", biasCorrectionCFG: enabled" if KolorsStorage.biasCFG == True else ""
     karras = " : Karras" if KolorsStorage.karras == True else ""
     generation_params = {
@@ -101,6 +101,7 @@ def create_infotext(sampler, positive_prompt, negative_prompt, guidance_scale, g
         "PAG": f"{PAG_scale} ({PAG_adapt})",
         "Sampler": f"{sampler}{karras}",
         "LoRA"          :   loraSettings,
+        "controlNet"    :   controlNetSettings,
     }
 #add i2i marker?
     prompt_text = f"{positive_prompt}\n"
@@ -511,6 +512,9 @@ def predict(positive_prompt, negative_prompt, sampler, width, height, guidance_s
     else:
         loraSettings = None
 
+    if useControlNet != None:
+        useControlNet += f" strength: {controlNetStrength}; step range: {controlNetStart}-{controlNetEnd}"
+
     original_samples_filename_pattern = opts.samples_filename_pattern
     opts.samples_filename_pattern = "Kolors_[datetime]"
     results = []
@@ -529,7 +533,7 @@ def predict(positive_prompt, negative_prompt, sampler, width, height, guidance_s
             fixed_seed + i, 
             width, height,
             PAG_scale, PAG_adapt,
-            loraSettings)
+            loraSettings, useControlNet)
 
         if maskType > 0 and maskSource is not None:
             # i2iSource = i2iSource.convert('RGB')
@@ -765,7 +769,7 @@ def on_ui_tabs():
     schedulerList = ["default", "DDPM", "DEIS", "DPM++ 2M", "DPM++ 2M SDE", "DPM", "DPM SDE",
                      "Euler", "Euler A", "LCM", "SA-solver", "UniPC", ]
 
-    def parsePrompt (positive, negative, sampler, width, height, seed, steps, cfg, rescale, nr, ng, nb, ns, PAG_scale, PAG_adapt):
+    def parsePrompt (positive, negative, sampler, width, height, seed, steps, cfg, rescale, nr, ng, nb, ns, PAG_scale, PAG_adapt, loraName, loraScale):
         p = positive.split('\n')
         lineCount = len(p)
 
@@ -852,13 +856,17 @@ def on_ui_tabs():
                             if len(pairs) == 3:
                                 PAG_scale = float(pairs[1])
                                 PAG_adapt = float(pairs[2].strip('\(\)'))
+                        case "LoRA:":
+                            if len(pairs) == 3:
+                                loraName = pairs[1]
+                                loraScale = float(pairs[2].strip('\(\)'))
                         case "Sampler:":
                             if len(pairs) == 3:
                                 sampler = f"{pairs[1]} {pairs[2]}"
                             else:
                                 sampler = pairs[1]
 
-        return positive, negative, sampler, width, height, seed, steps, cfg, rescale, nr, ng, nb, ns, PAG_scale, PAG_adapt
+        return positive, negative, sampler, width, height, seed, steps, cfg, rescale, nr, ng, nb, ns, PAG_scale, PAG_adapt, loraName, loraScale
 
     resolutionList1024 = [
         (2048, 512),    (1728, 576),    (1408, 704),    (1280, 768),    (1216, 832),
@@ -1003,7 +1011,7 @@ def on_ui_tabs():
                 else:
                     ctrls = [positive_prompt, negative_prompt, sampler, width, height, guidance_scale, CFGrescale, steps, sampling_seed, batch_size, i2iSource, i2iDenoise, style, PAG_scale, PAG_adapt, maskType, maskSource, maskBlur, maskCut, IPASource, IPAType, IPAScale, CNSource, CNMethod, CNStrength, CNStart, CNEnd]
                 
-                parseCtrls = [positive_prompt, negative_prompt, sampler, width, height, sampling_seed, steps, guidance_scale, CFGrescale, initialNoiseR, initialNoiseG, initialNoiseB, initialNoiseA, PAG_scale, PAG_adapt]
+                parseCtrls = [positive_prompt, negative_prompt, sampler, width, height, sampling_seed, steps, guidance_scale, CFGrescale, initialNoiseR, initialNoiseG, initialNoiseB, initialNoiseA, PAG_scale, PAG_adapt, lora, scale]
 
             with gradio.Column():
                 generate_button = gradio.Button(value="Generate", variant='primary', visible=True)
