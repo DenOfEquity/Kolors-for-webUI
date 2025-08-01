@@ -28,12 +28,13 @@ accelerate>=0.26.0
 >[!NOTE]
 > if **noUnload** is selected then models are kept in memory; otherwise reloaded for each run. The **unload models** button removes them from memory.
 
----
-
 
 ---
 <details>
 <summary>Change log</summary>
+
+#### 01/08/2025 ####
+* support custom models. In `{webui directory}\models\diffusers` create a subdirectory `KolorsCustom`. In that directory, create a subdirectory for the custom model; the directory name will be used as the display name in the newly added **Model** menu. Inside each of those should be the unet file (renamed to *diffusion_pytorch_model.safetensors*) and its `config.json` (copy from extension directory).
 
 #### 23/02/2025 ####
 * initial upload. includes IP Adapter (not faceID), controlnets, i2i.
