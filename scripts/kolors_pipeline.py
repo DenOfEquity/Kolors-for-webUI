@@ -189,7 +189,9 @@ class KolorsPipeline_DoE(DiffusionPipeline, StableDiffusionMixin, StableDiffusio
         feature_extractor: CLIPImageProcessor = None,
         force_zeros_for_empty_prompt: bool = False,
         pag_applied_layers: Union[str, List[str]] = "mid",
-    ):
+        face_clip_encoder: CLIPVisionModelWithProjection = None,
+        face_clip_processor: CLIPImageProcessor = None,
+        ):
         super().__init__()
 
         self.register_modules(
@@ -550,6 +552,9 @@ class KolorsPipeline_DoE(DiffusionPipeline, StableDiffusionMixin, StableDiffusio
         
         ip_adapter_image: Optional[PipelineImageInput] = None,
         ip_adapter_image_embeds: Optional[List[torch.Tensor]] = None,
+        ip_adapter_scale: float = 0.5,
+        ip_adapter_start: float = 0.0,
+        ip_adapter_end: float = 1.0,
 
         return_dict: bool = True,
         cross_attention_kwargs: Optional[Dict[str, Any]] = None,
@@ -955,13 +960,6 @@ class KolorsPipeline_DoE(DiffusionPipeline, StableDiffusionMixin, StableDiffusio
                 guidance_scale_tensor, embedding_dim=self.unet.config.time_cond_proj_dim
             ).to(device=device, dtype=latents.dtype)
 
-        if self.do_perturbed_attention_guidance:
-            original_attn_proc = self.unet.attn_processors
-            self._set_pag_attn_processor(
-                pag_applied_layers=self.pag_applied_layers,
-                do_classifier_free_guidance=self.do_classifier_free_guidance,
-            )
-
         self._num_timesteps = len(timesteps)
         num_timesteps = len(timesteps)
         with self.progress_bar(total=num_inference_steps) as progress_bar:
@@ -1010,6 +1008,10 @@ class KolorsPipeline_DoE(DiffusionPipeline, StableDiffusionMixin, StableDiffusio
 
                 if ip_adapter_image is not None or ip_adapter_image_embeds is not None:
                     added_cond_kwargs["image_embeds"] = image_embeds
+                    if thisStep >= ip_adapter_start and thisStep <= ip_adapter_end:
+                        self.set_ip_adapter_scale([ip_adapter_scale])
+                    else:
+                        self.set_ip_adapter_scale([0.0])
 
                 noise_pred = self.unet(
                     latent_model_input,

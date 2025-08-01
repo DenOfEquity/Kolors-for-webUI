@@ -69,6 +69,7 @@ from modules.ui_components import ResizeHandleRow, ToolButton
 import modules.infotext_utils as parameters_copypaste
 
 ##   diffusers / transformers necessary imports
+from diffusers.models import UNet2DConditionModel
 from diffusers import DEISMultistepScheduler, DPMSolverSinglestepScheduler, DPMSolverMultistepScheduler, DPMSolverSDEScheduler
 from diffusers import EulerAncestralDiscreteScheduler, EulerDiscreteScheduler, UniPCMultistepScheduler, DDPMScheduler
 from diffusers import SASolverScheduler, LCMScheduler
@@ -89,7 +90,7 @@ import scripts.kolors_pipeline as pipeline
 
 
 # modules/processing.py - don't use ',', '\n', ':' in values
-def create_infotext(sampler, positive_prompt, negative_prompt, guidance_scale, guidance_rescale, steps, seed, width, height, PAG_scale, PAG_adapt, loraSettings, controlNetSettings):
+def create_infotext(model, sampler, positive_prompt, negative_prompt, guidance_scale, guidance_rescale, steps, seed, width, height, PAG_scale, PAG_adapt, loraSettings, controlNetSettings):
     bCFG = ", biasCorrectionCFG: enabled" if KolorsStorage.biasCFG == True else ""
     karras = " : Karras" if KolorsStorage.karras == True else ""
     generation_params = {
@@ -110,9 +111,9 @@ def create_infotext(sampler, positive_prompt, negative_prompt, guidance_scale, g
     generation_params_text = ", ".join([k if k == v else f'{k}: {v}' for k, v in generation_params.items() if v is not None])
     noise_text = f", Initial noise: {KolorsStorage.noiseRGBA}" if KolorsStorage.noiseRGBA[3] != 0.0 else ""
 
-    return f"{prompt_text}{generation_params_text}{noise_text}{bCFG}, Model (Kolors)"
+    return f"{prompt_text}{generation_params_text}{noise_text}{bCFG}, Model (Kolors): {model}"
 
-def predict(positive_prompt, negative_prompt, sampler, width, height, guidance_scale, guidance_rescale, num_steps, sampling_seed, num_images, i2iSource, i2iDenoise, style, PAG_scale, PAG_adapt, maskType, maskSource, maskBlur, maskCutOff, IPASource, IPAType, IPAScale, controlNetImage, controlNet, controlNetStrength, controlNetStart, controlNetEnd,  *args):
+def predict(model, positive_prompt, negative_prompt, sampler, width, height, guidance_scale, guidance_rescale, num_steps, sampling_seed, num_images, i2iSource, i2iDenoise, style, PAG_scale, PAG_adapt, maskType, maskSource, maskBlur, maskCutOff, IPASource, IPAType, IPAScale, IPAStart, IPAEnd, controlNetImage, controlNet, controlNetStrength, controlNetStart, controlNetEnd,  *args):
  
     logging.set_verbosity(logging.ERROR)        #   diffusers and transformers both enjoy spamming the console with useless info
  
@@ -280,15 +281,34 @@ def predict(positive_prompt, negative_prompt, sampler, width, height, guidance_s
     ####    end text encoding
 
     ####    setup pipe for transformer + VAE
+    if KolorsStorage.lastModel != model:
+        KolorsStorage.pipeTR = None
+
     if KolorsStorage.pipeTR == None:
-        KolorsStorage.pipeTR = pipeline.KolorsPipeline_DoE.from_pretrained(
-            "Kwai-Kolors/Kolors-diffusers",
-            tokenizer=None,
-            text_encoder=None,
-            controlnet=None,
-            variant=variant,
-            torch_dtype=dtype,
-        )
+        isCustom = "/" not in model
+
+        if isCustom:
+            custom = ".//models//diffusers//KolorsCustom//" + model
+            KolorsStorage.pipeTR = pipeline.KolorsPipeline_DoE.from_pretrained(
+                "Kwai-Kolors/Kolors-diffusers",
+                tokenizer=None,
+                text_encoder=None,
+                unet=UNet2DConditionModel.from_pretrained(custom, torch_dtype=dtype),
+                controlnet=None,
+                variant=variant,
+                torch_dtype=dtype,
+            )
+        else:
+            KolorsStorage.pipeTR = pipeline.KolorsPipeline_DoE.from_pretrained(
+                "Kwai-Kolors/Kolors-diffusers",
+                tokenizer=None,
+                text_encoder=None,
+                controlnet=None,
+                variant=variant,
+                torch_dtype=dtype,
+            )
+
+        KolorsStorage.lastModel = model
         #image_encoder
         #feature_extractor - for instant id?
 
@@ -304,23 +324,36 @@ def predict(positive_prompt, negative_prompt, sampler, width, height, guidance_s
 
 
     if IPASource is not None and IPAType != "(None)":
-        KolorsStorage.pipeTR.image_encoder = CLIPVisionModelWithProjection.from_pretrained(
-                                                    "Kwai-Kolors/Kolors-IP-Adapter-Plus",
-                                                    subfolder="image_encoder",
-                                                    low_cpu_mem_usage=True,
-                                                    torch_dtype=torch.float16,
-                                                    revision="refs/pr/4",
-                                                )
-        KolorsStorage.pipeTR.load_ip_adapter(
-            "Kwai-Kolors/Kolors-IP-Adapter-Plus",
-            subfolder="",
-            weight_name="ip_adapter_plus_general.safetensors",
-            revision="refs/pr/4",
-            image_encoder_folder=None,
-        )
-        KolorsStorage.pipeTR.set_ip_adapter_scale([IPAScale])
-        
-        #KolorsStorage.pipeTR.set_face_fidelity_scale(scale)
+        if IPAType == "Plus":
+            KolorsStorage.pipeTR.image_encoder = CLIPVisionModelWithProjection.from_pretrained(
+                                                        "Kwai-Kolors/Kolors-IP-Adapter-Plus",
+                                                        subfolder="image_encoder",
+                                                        low_cpu_mem_usage=True,
+                                                        torch_dtype=torch.float16,
+                                                        revision="refs/pr/4",
+                                                    )
+            KolorsStorage.pipeTR.load_ip_adapter(
+                "Kwai-Kolors/Kolors-IP-Adapter-Plus",
+                subfolder="",
+                weight_name="ip_adapter_plus_general.safetensors",
+                revision="refs/pr/4",
+                image_encoder_folder=None,
+            )
+        # elif IPAType == "Face":
+            # KolorsStorage.pipeTR.image_encoder = CLIPVisionModelWithProjection.from_pretrained(
+                                                        # "Kwai-Kolors/Kolors-IP-Adapter-FaceID-Plus",
+                                                        # subfolder="clip-vit-large-patch14-336",
+                                                        # low_cpu_mem_usage=True,
+                                                        # torch_dtype=torch.float16,
+                                                        # revision="refs/pr/1",
+                                                    # )
+            # KolorsStorage.pipeTR.load_ip_adapter_faceid_plus(
+                # "Kwai-Kolors/Kolors-IP-Adapter-FaceID-Plus",
+                # subfolder="",
+                # weight_name="ipa-faceid-plus.bin", #revision="refs/pr/1",
+                # image_encoder_folder=None,
+            # )
+            # KolorsStorage.pipeTR.set_face_fidelity_scale(IPAScale)
     else:
         KolorsStorage.pipeTR.image_encoder = None
         KolorsStorage.pipeTR.feature_extractor = None
@@ -469,6 +502,9 @@ def predict(positive_prompt, negative_prompt, sampler, width, height, guidance_s
             pag_adaptive_scale              = PAG_adapt,
             
             ip_adapter_image                = IPASource,
+            ip_adapter_scale                = IPAScale,
+            ip_adapter_start                = IPAStart,
+            ip_adapter_end                  = IPAEnd,
             
             control_image                   = controlNetImage if useControlNet else None, 
             controlnet_conditioning_scale   = controlNetStrength,  
@@ -526,7 +562,7 @@ def predict(positive_prompt, negative_prompt, sampler, width, height, guidance_s
         image = KolorsStorage.pipeTR.image_processor.postprocess(image, output_type="pil")[0]
 
         info=create_infotext(
-            sampler,
+            model, sampler,
             positive_prompt, negative_prompt,
             guidance_scale, guidance_rescale, 
             num_steps, 
@@ -575,7 +611,23 @@ def on_ui_tabs():
     
     defaultWidth = 1024
     defaultHeight = 1024
- 
+
+    def buildModelList ():
+        try:
+            custom = [name for name in os.listdir(".//models//diffusers//KolorsCustom") if os.path.isdir(os.path.join(".//models//diffusers//KolorsCustom", name))]
+            models_list = ["Kwai-Kolors/Kolors-diffusers"] + custom
+        except:
+            models_list = ["Kwai-Kolors/Kolors-diffusers"]
+
+        return models_list
+
+    models_list = buildModelList ()
+
+    def refreshModels ():
+        models = buildModelList ()
+        return gradio.Dropdown.update(choices=models)
+
+
     def buildLoRAList ():
         loras = ["(None)"]
         
@@ -861,10 +913,10 @@ def on_ui_tabs():
                                 loraName = pairs[1]
                                 loraScale = float(pairs[2].strip('\(\)'))
                         case "Sampler:":
-                            if len(pairs) == 3:
-                                sampler = f"{pairs[1]} {pairs[2]}"
-                            else:
-                                sampler = pairs[1]
+                            sampler = ' '.join(pairs[1:])
+
+                            if sampler not in schedulerList:
+                                sampler = schedulerList[0]
 
         return positive, negative, sampler, width, height, seed, steps, cfg, rescale, nr, ng, nb, ns, PAG_scale, PAG_adapt, loraName, loraScale
 
@@ -898,6 +950,8 @@ def on_ui_tabs():
             with gradio.Column():
                 with gradio.Row():
                     access = ToolButton(value='\U0001F917', variant='secondary', visible=False)
+                    model = gradio.Dropdown(models_list, label='Model', value=models_list[0], type='value', scale=2)
+                    refreshM = ToolButton(value='\U0001f504')
                     CL = ToolButton(value='\u29BE', variant='secondary', tooltip='centre latents to mean')
                     SP = ToolButton(value='ꌗ', variant='secondary', tooltip='prompt enhancement')
                     parse = ToolButton(value="↙️", variant='secondary', tooltip="parse")
@@ -949,6 +1003,8 @@ def on_ui_tabs():
                         with gradio.Column():
                             IPAType = gradio.Dropdown(label='Type', choices=["(None)", "Plus"], value="(None)")
                             IPAScale = gradio.Slider(label="Scale", minimum=0.01, maximum=1.0, step=0.01, value=0.5)
+                            IPAStart = gradio.Slider(label='Start step', minimum=0.00, maximum=1.0, step=0.01, value=0.0)
+                            IPAEnd = gradio.Slider(label='End step', minimum=0.00, maximum=1.0, step=0.01, value=0.8)
 
                 with gradio.Accordion(label='ControlNet', open=False, visible=True):
                     with gradio.Row():
@@ -983,7 +1039,7 @@ def on_ui_tabs():
                             if KolorsStorage.usingGradio4:
                                 maskSource = gradio.ImageEditor(label='mask source', sources=['upload'], type='pil', interactive=True, show_download_button=False, layers=False, brush=gradio.Brush(colors=['#FFFFFF'], color_mode='fixed'))
                             else:
-                                maskSource = gradio.Image(label='mask source', sources=['upload'], type='pil', interactive=True, show_download_button=False, tool='sketch', image_mode='RGB', brush_color='#F0F0F0')#opts.img2img_inpaint_mask_brush_color)
+                                maskSource = gradio.Image(label='mask source', sources=['upload'], type='pil', interactive=True, show_download_button=False, tool='sketch', image_mode='RGB', brush_color=opts.img2img_inpaint_mask_brush_color)
                         with gradio.Row():
                             with gradio.Column():
                                 with gradio.Row():
@@ -1007,9 +1063,9 @@ def on_ui_tabs():
                     unloadModels = gradio.Button(value='unload models', tooltip='force unload of models', scale=1)
 
                 if KolorsStorage.forgeCanvas:
-                    ctrls = [positive_prompt, negative_prompt, sampler, width, height, guidance_scale, CFGrescale, steps, sampling_seed, batch_size, i2iSource.background, i2iDenoise, style, PAG_scale, PAG_adapt, maskType, i2iSource.foreground, maskBlur, maskCut, IPASource, IPAType, IPAScale, CNSource, CNMethod, CNStrength, CNStart, CNEnd]
+                    ctrls = [model, positive_prompt, negative_prompt, sampler, width, height, guidance_scale, CFGrescale, steps, sampling_seed, batch_size, i2iSource.background, i2iDenoise, style, PAG_scale, PAG_adapt, maskType, i2iSource.foreground, maskBlur, maskCut, IPASource, IPAType, IPAScale, IPAStart, IPAEnd, CNSource, CNMethod, CNStrength, CNStart, CNEnd]
                 else:
-                    ctrls = [positive_prompt, negative_prompt, sampler, width, height, guidance_scale, CFGrescale, steps, sampling_seed, batch_size, i2iSource, i2iDenoise, style, PAG_scale, PAG_adapt, maskType, maskSource, maskBlur, maskCut, IPASource, IPAType, IPAScale, CNSource, CNMethod, CNStrength, CNStart, CNEnd]
+                    ctrls = [model, positive_prompt, negative_prompt, sampler, width, height, guidance_scale, CFGrescale, steps, sampling_seed, batch_size, i2iSource, i2iDenoise, style, PAG_scale, PAG_adapt, maskType, maskSource, maskBlur, maskCut, IPASource, IPAType, IPAScale, IPAStart, IPAEnd, CNSource, CNMethod, CNStrength, CNStart, CNEnd]
                 
                 parseCtrls = [positive_prompt, negative_prompt, sampler, width, height, sampling_seed, steps, guidance_scale, CFGrescale, initialNoiseR, initialNoiseG, initialNoiseB, initialNoiseA, PAG_scale, PAG_adapt, lora, scale]
 
@@ -1017,6 +1073,8 @@ def on_ui_tabs():
                 generate_button = gradio.Button(value="Generate", variant='primary', visible=True)
                 output_gallery = gradio.Gallery(label='Output', height="80vh", type='pil', interactive=False, elem_id="Kolors_gallery",
                                             show_label=False, object_fit='contain', visible=True, columns=3, rows=3, preview=True)
+
+                output_gallery.change(fn=lambda: None, _js='setup_gallery_lightbox')
 
 #   caption not displaying linebreaks, alt text does
                 gallery_index = gradio.Number(value=0, visible=False)
@@ -1047,6 +1105,7 @@ def on_ui_tabs():
         noUnload.click(toggleNU, inputs=None, outputs=noUnload)
         unloadModels.click(unloadM, inputs=None, outputs=None, show_progress=True)
 
+        refreshM.click(refreshModels, inputs=None, outputs=[model])
         SP.click(toggleSP, inputs=None, outputs=SP).then(superPrompt, inputs=[positive_prompt, sampling_seed], outputs=[SP, positive_prompt])
         karras.click(toggleKarras, inputs=None, outputs=karras)
         sharpNoise.click(toggleSharp, inputs=None, outputs=sharpNoise)
